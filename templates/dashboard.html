@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Face Recognition Door Lock</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <!-- Header -->
+    <div class="bg-blue-600 text-white">
+        <div class="container mx-auto px-4 py-6">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h1 class="text-3xl font-bold">Admin Dashboard</h1>
+                    <p class="mt-2">Manage Face Encodings</p>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span class="text-blue-100">Welcome, Admin</span>
+                    <a href="/logout" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition duration-200">
+                        Logout
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container mx-auto px-4 py-8">
+        <!-- Add New Face Section -->
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+            <h2 class="text-2xl font-bold mb-4">Add New Face Encoding</h2>
+            
+            <form id="addFaceForm" class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="name" class="block text-sm font-medium text-gray-700 mb-2">Person Name</label>
+                        <input type="text" id="name" name="name" required 
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                               placeholder="Enter person's name">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Camera Setup</label>
+                        
+                        <!-- Camera Selection -->
+                        <div class="mb-3">
+                            <label for="cameraSelect" class="block text-sm font-medium text-gray-700 mb-1">Camera:</label>
+                            <select id="cameraSelect" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                                <option value="">Loading cameras...</option>
+                            </select>
+                            <button type="button" id="refreshCamerasBtn" class="mt-1 bg-gray-600 hover:bg-gray-700 text-white px-2 py-1 rounded text-xs">
+                                Refresh
+                            </button>
+                        </div>
+                        
+                        <!-- Camera Preview -->
+                        <div class="relative">
+                            <video id="video" width="100%" height="200" autoplay class="rounded-md border border-gray-300"></video>
+                            <button type="button" id="captureBtn" class="absolute bottom-2 right-2 bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700">
+                                Capture
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="capturedImageContainer" class="hidden">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Captured Image</label>
+                    <canvas id="canvas" width="320" height="200" class="rounded-md border border-gray-300"></canvas>
+                </div>
+                
+                <div class="flex items-center space-x-4">
+                    <button type="submit" id="submitBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg transition duration-200">
+                        Add Face Encoding
+                    </button>
+                    <button type="button" id="retakeBtn" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-6 rounded-lg transition duration-200 hidden">
+                        Retake Photo
+                    </button>
+                </div>
+            </form>
+            
+            <div id="message" class="mt-4"></div>
+        </div>
+
+        <!-- Existing Faces Section -->
+        <div class="bg-white rounded-lg shadow-lg p-6">
+            <h2 class="text-2xl font-bold mb-4">Registered Faces</h2>
+            
+            {% if faces %}
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {% for face in faces %}
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <div class="flex justify-between items-start mb-2">
+                        <h3 class="text-lg font-semibold text-gray-800">{{ face.name }}</h3>
+                        <button onclick="deleteFace('{{ face.name }}')" 
+                                class="text-red-600 hover:text-red-800 text-sm font-medium">
+                            Delete
+                        </button>
+                    </div>
+                    <p class="text-sm text-gray-600">Added: {{ face.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                    <div class="mt-2">
+                        <span class="inline-block bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">
+                            Active
+                        </span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center py-8">
+                <p class="text-gray-500 text-lg">No face encodings registered yet.</p>
+                <p class="text-gray-400 text-sm mt-2">Add your first face encoding above.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        let video = document.getElementById('video');
+        let canvas = document.getElementById('canvas');
+        let captureBtn = document.getElementById('captureBtn');
+        let capturedImageContainer = document.getElementById('capturedImageContainer');
+        let submitBtn = document.getElementById('submitBtn');
+        let retakeBtn = document.getElementById('retakeBtn');
+        let messageDiv = document.getElementById('message');
+        let addFaceForm = document.getElementById('addFaceForm');
+        let cameraSelect = document.getElementById('cameraSelect');
+        let refreshCamerasBtn = document.getElementById('refreshCamerasBtn');
+        
+        let stream = null;
+        let capturedImageData = null;
+        let isCaptured = false;
+        let availableCameras = [];
+
+        // Get available cameras
+        async function getAvailableCameras() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                availableCameras = videoDevices;
+                
+                // Clear existing options
+                cameraSelect.innerHTML = '';
+                
+                if (videoDevices.length === 0) {
+                    cameraSelect.innerHTML = '<option value="">No cameras found</option>';
+                    return;
+                }
+                
+                // Add camera options
+                videoDevices.forEach((device, index) => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.textContent = device.label || `Camera ${index + 1}`;
+                    
+                    // Prioritize USB cameras (they often have longer names)
+                    if (device.label && device.label.toLowerCase().includes('usb')) {
+                        option.textContent = `🔌 ${option.textContent} (USB)`;
+                        option.selected = true; // Auto-select USB cameras
+                    }
+                    
+                    cameraSelect.appendChild(option);
+                });
+                
+                // Auto-select first camera if none selected
+                if (!cameraSelect.value && videoDevices.length > 0) {
+                    cameraSelect.value = videoDevices[0].deviceId;
+                }
+                
+            } catch (err) {
+                console.error('Error getting cameras:', err);
+                cameraSelect.innerHTML = '<option value="">Error getting cameras</option>';
+            }
+        }
+
+        // Initialize camera with specific device
+        async function initCamera(deviceId = null) {
+            try {
+                // Stop existing stream
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+                
+                const constraints = {
+                    video: {
+                        width: 320,
+                        height: 200
+                    }
+                };
+                
+                // If device ID is specified, use it
+                if (deviceId) {
+                    constraints.video.deviceId = { exact: deviceId };
+                }
+                
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                
+            } catch (err) {
+                console.error('Error accessing camera:', err);
+                
+                // If specific device fails, try without device constraint
+                if (deviceId) {
+                    console.log('Trying fallback camera initialization...');
+                    try {
+                        stream = await navigator.mediaDevices.getUserMedia({ 
+                            video: { width: 320, height: 200 } 
+                        });
+                        video.srcObject = stream;
+                    } catch (fallbackErr) {
+                        console.error('Fallback camera also failed:', fallbackErr);
+                        showMessage('Error accessing camera: ' + fallbackErr.message, 'error');
+                    }
+                } else {
+                    showMessage('Error accessing camera: ' + err.message, 'error');
+                }
+            }
+        }
+
+        // Handle camera selection change
+        cameraSelect.addEventListener('change', () => {
+            const selectedDeviceId = cameraSelect.value;
+            if (selectedDeviceId) {
+                initCamera(selectedDeviceId);
+            }
+        });
+
+        // Refresh cameras button
+        refreshCamerasBtn.addEventListener('click', () => {
+            getAvailableCameras();
+        });
+
+        // Capture image
+        captureBtn.addEventListener('click', () => {
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, 320, 200);
+            
+            capturedImageData = canvas.toDataURL('image/jpeg');
+            capturedImageContainer.classList.remove('hidden');
+            retakeBtn.classList.remove('hidden');
+            captureBtn.classList.add('hidden');
+            isCaptured = true;
+        });
+
+        // Retake photo
+        retakeBtn.addEventListener('click', () => {
+            capturedImageContainer.classList.add('hidden');
+            retakeBtn.classList.add('hidden');
+            captureBtn.classList.remove('hidden');
+            isCaptured = false;
+            capturedImageData = null;
+        });
+
+        // Submit form
+        addFaceForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!isCaptured) {
+                showMessage('Please capture a photo first', 'error');
+                return;
+            }
+            
+            const name = document.getElementById('name').value.trim();
+            if (!name) {
+                showMessage('Please enter a name', 'error');
+                return;
+            }
+            
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Adding...';
+            
+            try {
+                const response = await fetch('/add_face', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `name=${encodeURIComponent(name)}&image=${encodeURIComponent(capturedImageData)}`
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage(result.message, 'success');
+                    // Reset form
+                    addFaceForm.reset();
+                    capturedImageContainer.classList.add('hidden');
+                    retakeBtn.classList.add('hidden');
+                    captureBtn.classList.remove('hidden');
+                    isCaptured = false;
+                    capturedImageData = null;
+                    
+                    // Reload page to show new face
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showMessage(result.error, 'error');
+                }
+            } catch (error) {
+                console.error('Error adding face:', error);
+                showMessage('Error adding face encoding', 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Add Face Encoding';
+            }
+        });
+
+        // Delete face
+        async function deleteFace(name) {
+            if (!confirm(`Are you sure you want to delete the face encoding for ${name}?`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/delete_face', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `name=${encodeURIComponent(name)}`
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage(result.message, 'success');
+                    // Reload page to update list
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showMessage(result.error, 'error');
+                }
+            } catch (error) {
+                console.error('Error deleting face:', error);
+                showMessage('Error deleting face encoding', 'error');
+            }
+        }
+
+        // Show message
+        function showMessage(text, type) {
+            messageDiv.innerHTML = `
+                <div class="p-4 rounded-md ${type === 'success' ? 'bg-green-100 text-green-800 border border-green-400' : 'bg-red-100 text-red-800 border border-red-400'}">
+                    ${text}
+                </div>
+            `;
+            
+            setTimeout(() => {
+                messageDiv.innerHTML = '';
+            }, 5000);
+        }
+
+        // Initialize when page loads
+        window.addEventListener('load', async () => {
+            await getAvailableCameras();
+            if (cameraSelect.value) {
+                await initCamera(cameraSelect.value);
+            }
+        });
+        
+        // Cleanup when page unloads
+        window.addEventListener('beforeunload', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        });
+    </script>
+</body>
+</html>

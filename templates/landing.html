@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Recognition Door Lock</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: 0 auto;
+        }
+        .result-display {
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+        .matched { background-color: #10b981; color: white; }
+        .not-matched { background-color: #ef4444; color: white; }
+        .neutral { background-color: #6b7280; color: white; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <!-- Header -->
+    <div class="bg-blue-600 text-white text-center py-6">
+        <h1 class="text-3xl font-bold">Face Recognition Door Lock</h1>
+        <p class="mt-2">Secure access with facial recognition</p>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container mx-auto px-4 py-8">
+        <!-- Camera Section -->
+        <div class="camera-container">
+            <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+                <h2 class="text-2xl font-bold text-center mb-4">Face Recognition</h2>
+                
+                <!-- Camera Selection -->
+                <div class="mb-4">
+                    <label for="cameraSelect" class="block text-sm font-medium text-gray-700 mb-2">Select Camera:</label>
+                    <select id="cameraSelect" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">Loading cameras...</option>
+                    </select>
+                    <button id="refreshCamerasBtn" class="mt-2 bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-sm">
+                        Refresh Cameras
+                    </button>
+                </div>
+                
+                <!-- Camera Feed -->
+                <div class="mb-4">
+                    <video id="video" width="100%" height="400" autoplay class="rounded-lg border-2 border-gray-300"></video>
+                </div>
+                
+                <!-- Capture Button -->
+                <div class="text-center mb-4">
+                    <button id="captureBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-lg transition duration-200">
+                        Capture & Recognize
+                    </button>
+                </div>
+                
+                <!-- Result Display -->
+                <div id="resultDisplay" class="result-display neutral rounded-lg">
+                    Ready to capture face
+                </div>
+                
+                <!-- Captured Image -->
+                <div id="capturedImageContainer" class="mt-4 hidden">
+                    <h3 class="text-lg font-semibold mb-2">Captured Image:</h3>
+                    <canvas id="canvas" width="640" height="400" class="rounded-lg border border-gray-300"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Status Section -->
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+            <h2 class="text-2xl font-bold text-center mb-4">System Status</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-green-100 p-4 rounded-lg">
+                    <h3 class="font-semibold text-green-800">Camera Status</h3>
+                    <p id="cameraStatus" class="text-green-600">Initializing...</p>
+                </div>
+                <div class="bg-blue-100 p-4 rounded-lg">
+                    <h3 class="font-semibold text-blue-800">Recognition Status</h3>
+                    <p id="recognitionStatus" class="text-blue-600">Ready</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Button - Bottom Right -->
+    <div class="fixed bottom-6 right-6">
+        <button onclick="showLoginModal()" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-full shadow-lg transition duration-200">
+            Admin Login
+        </button>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-8 max-w-md w-full mx-4">
+            <h2 class="text-2xl font-bold text-center mb-6">Admin Login</h2>
+            
+            {% if error %}
+            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                {{ error }}
+            </div>
+            {% endif %}
+            
+            <form method="POST" action="/login">
+                <div class="mb-4">
+                    <label for="username" class="block text-gray-700 text-sm font-bold mb-2">Username</label>
+                    <input type="text" id="username" name="username" required 
+                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                </div>
+                
+                <div class="mb-6">
+                    <label for="password" class="block text-gray-700 text-sm font-bold mb-2">Password</label>
+                    <input type="password" id="password" name="password" required 
+                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                </div>
+                
+                <div class="flex items-center justify-between">
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                        Sign In
+                    </button>
+                    <button type="button" onclick="hideLoginModal()" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let video = document.getElementById('video');
+        let canvas = document.getElementById('canvas');
+        let captureBtn = document.getElementById('captureBtn');
+        let resultDisplay = document.getElementById('resultDisplay');
+        let capturedImageContainer = document.getElementById('capturedImageContainer');
+        let cameraStatus = document.getElementById('cameraStatus');
+        let recognitionStatus = document.getElementById('recognitionStatus');
+        let cameraSelect = document.getElementById('cameraSelect');
+        let refreshCamerasBtn = document.getElementById('refreshCamerasBtn');
+        
+        let stream = null;
+        let isRecognizing = false;
+        let availableCameras = [];
+
+        // Get available cameras
+        async function getAvailableCameras() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                availableCameras = videoDevices;
+                
+                // Clear existing options
+                cameraSelect.innerHTML = '';
+                
+                if (videoDevices.length === 0) {
+                    cameraSelect.innerHTML = '<option value="">No cameras found</option>';
+                    return;
+                }
+                
+                // Add camera options
+                videoDevices.forEach((device, index) => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.textContent = device.label || `Camera ${index + 1}`;
+                    
+                    // Prioritize USB cameras (they often have longer names)
+                    if (device.label && device.label.toLowerCase().includes('usb')) {
+                        option.textContent = `🔌 ${option.textContent} (USB)`;
+                        option.selected = true; // Auto-select USB cameras
+                    }
+                    
+                    cameraSelect.appendChild(option);
+                });
+                
+                // Auto-select first camera if none selected
+                if (!cameraSelect.value && videoDevices.length > 0) {
+                    cameraSelect.value = videoDevices[0].deviceId;
+                }
+                
+                cameraStatus.textContent = `${videoDevices.length} camera(s) found`;
+                cameraStatus.className = 'text-green-600';
+                
+            } catch (err) {
+                console.error('Error getting cameras:', err);
+                cameraStatus.textContent = 'Error getting cameras: ' + err.message;
+                cameraStatus.className = 'text-red-600';
+            }
+        }
+
+        // Initialize camera with specific device
+        async function initCamera(deviceId = null) {
+            try {
+                // Stop existing stream
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+                
+                const constraints = {
+                    video: {
+                        width: 640,
+                        height: 400
+                    }
+                };
+                
+                // If device ID is specified, use it
+                if (deviceId) {
+                    constraints.video.deviceId = { exact: deviceId };
+                }
+                
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                cameraStatus.textContent = 'Active';
+                cameraStatus.className = 'text-green-600';
+                
+            } catch (err) {
+                console.error('Error accessing camera:', err);
+                cameraStatus.textContent = 'Error: ' + err.message;
+                cameraStatus.className = 'text-red-600';
+                
+                // If specific device fails, try without device constraint
+                if (deviceId) {
+                    console.log('Trying fallback camera initialization...');
+                    try {
+                        stream = await navigator.mediaDevices.getUserMedia({ 
+                            video: { width: 640, height: 400 } 
+                        });
+                        video.srcObject = stream;
+                        cameraStatus.textContent = 'Active (Fallback)';
+                        cameraStatus.className = 'text-yellow-600';
+                    } catch (fallbackErr) {
+                        cameraStatus.textContent = 'Error: ' + fallbackErr.message;
+                        cameraStatus.className = 'text-red-600';
+                    }
+                }
+            }
+        }
+
+        // Handle camera selection change
+        cameraSelect.addEventListener('change', () => {
+            const selectedDeviceId = cameraSelect.value;
+            if (selectedDeviceId) {
+                initCamera(selectedDeviceId);
+            }
+        });
+
+        // Refresh cameras button
+        refreshCamerasBtn.addEventListener('click', () => {
+            getAvailableCameras();
+        });
+
+        // Capture and recognize face
+        captureBtn.addEventListener('click', async () => {
+            if (isRecognizing) return;
+            
+            isRecognizing = true;
+            captureBtn.disabled = true;
+            captureBtn.textContent = 'Processing...';
+            
+            try {
+                // Capture image
+                const context = canvas.getContext('2d');
+                context.drawImage(video, 0, 0, 640, 400);
+                
+                // Convert to base64
+                const imageData = canvas.toDataURL('image/jpeg');
+                
+                // Show captured image
+                capturedImageContainer.classList.remove('hidden');
+                
+                // Send for recognition
+                const response = await fetch('/recognize_face', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `image=${encodeURIComponent(imageData)}`
+                });
+                
+                const result = await response.json();
+                
+                if (result.result === 'matched') {
+                    resultDisplay.textContent = `MATCHED: ${result.name}`;
+                    resultDisplay.className = 'result-display matched rounded-lg';
+                    recognitionStatus.textContent = 'Access Granted';
+                    recognitionStatus.className = 'text-green-600';
+                    
+                    // Send to Arduino (you can implement this)
+                    sendToArduino('matched');
+                } else {
+                    resultDisplay.textContent = 'NOT MATCHED';
+                    resultDisplay.className = 'result-display not-matched rounded-lg';
+                    recognitionStatus.textContent = 'Access Denied';
+                    recognitionStatus.className = 'text-red-600';
+                    
+                    // Send to Arduino (you can implement this)
+                    sendToArduino('not matched');
+                }
+                
+            } catch (error) {
+                console.error('Error during recognition:', error);
+                resultDisplay.textContent = 'Error during recognition';
+                resultDisplay.className = 'result-display not-matched rounded-lg';
+            } finally {
+                isRecognizing = false;
+                captureBtn.disabled = false;
+                captureBtn.textContent = 'Capture & Recognize';
+            }
+        });
+
+        // Function to send result to Arduino (placeholder)
+        function sendToArduino(result) {
+            // This function can be implemented to send data to Arduino
+            // For now, we'll just log it
+            console.log('Sending to Arduino:', result);
+            
+            // You can implement HTTP request to Arduino or WebSocket connection
+            // Example: fetch('http://arduino-ip/result', { method: 'POST', body: result });
+        }
+
+        // Modal functions
+        function showLoginModal() {
+            document.getElementById('loginModal').classList.remove('hidden');
+        }
+
+        function hideLoginModal() {
+            document.getElementById('loginModal').classList.add('hidden');
+        }
+
+        // Initialize when page loads
+        window.addEventListener('load', async () => {
+            await getAvailableCameras();
+            if (cameraSelect.value) {
+                await initCamera(cameraSelect.value);
+            }
+        });
+        
+        // Cleanup when page unloads
+        window.addEventListener('beforeunload', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        });
+    </script>
+</body>
+</html>
